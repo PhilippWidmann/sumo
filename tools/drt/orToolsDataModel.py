@@ -264,8 +264,8 @@ def reject_late_reservations(data_reservations: list[Reservation], waiting_time:
     rejected_reservations = []
     for data_reservation in data_reservations:
         if not data_reservation.vehicle and data_reservation.reservation.reservationTime + waiting_time < timestep:
-            for person in data_reservation.get_persons():
-                traci.person.removeStages(person)
+            #for person in data_reservation.get_persons(): Todo Philipp: restore this and report bug
+            #    traci.person.removeStages(person)
             rejected_reservations.append(data_reservation)
         else:
             new_data_reservations.append(data_reservation)
