@@ -137,6 +137,17 @@ class Reservation:
 
 
 @dataclass
+class ChargingOpportunity:
+    id_charging_station: int
+    charging_time: int
+    node: int = None
+    vehicle: Vehicle = None
+
+    def get_edge(self) -> str:
+        return traci.chargingstation.getLaneID(self.id_charging_station).rsplit('_', 1)[0]
+
+
+@dataclass
 class ORToolsDataModel:
     """
     Data model class used by constrains of the OR-tools lib.
@@ -192,10 +203,11 @@ class Node:
 
 
 # use 'type' statement in python version 3.12 or higher
-NodeObject = typing.Union[str, Vehicle, Reservation]
+NodeObject = typing.Union[str, Vehicle, Reservation, ChargingOpportunity]
 
 
-def create_nodes(reservations: list[Reservation], vehicles: list[Vehicle]) -> list[NodeObject]:
+def create_nodes(reservations: list[Reservation], vehicles: list[Vehicle],
+                 charging_opportunities: list[ChargingOpportunity]) -> list[NodeObject]:
     """
     Sets the node ids from 0...n for the locations of the start and
     end points of the reservations and vehicles.
@@ -217,6 +229,10 @@ def create_nodes(reservations: list[Reservation], vehicles: list[Vehicle]) -> li
         n += 1
         veh.end_node = 0  # currently all vehicles end at depot
         # TODO: to generalize the end nodes, separate nodes are needed
+    for co in charging_opportunities:
+        node_objects.append(co)
+        co.node = n
+        n += 1
     return node_objects
 
 
@@ -226,6 +242,25 @@ def create_vehicles(fleet: list[str]) -> list[Vehicle]:
         veh = Vehicle(veh_id, i)
         vehicles.append(veh)
     return vehicles
+
+
+def create_charging_opportunities(number_charging_duplicates: int, fleet: list[str]) -> list[ChargingOpportunity]:
+    # Prepare allowed charging stops
+    # Each charging stop needs its own node. Thus, we use multiple nodes per charging station.
+    charging_opportunities = []
+    if number_charging_duplicates > 0:
+        charging_stations = traci.chargingstation.getIDList()
+        energy_capacities = [int(float(traci.vehicle.getParameter(id_vehicle, 'device.battery.maximumBatteryCapacity')))
+                             for id_vehicle in fleet]
+        for cs in charging_stations:
+            charging_duration = max(energy_capacities) / traci.chargingstation.getChargingPower(cs) * 60 * 60
+            for i in range(number_charging_duplicates):
+                charging_opp = ChargingOpportunity(
+                    id_charging_station=cs,
+                    charging_time=charging_duration,
+                )
+                charging_opportunities.append(charging_opp)
+    return charging_opportunities
 
 
 # list[traci.Person.Reservation]
@@ -289,7 +324,7 @@ def get_edge_of_node_object(node_object: NodeObject, node: int) -> str | None:
     to make clear if the edge of the departure or destination is searched.
     Returns "None" if an edge cannot be found.
     """
-    if isinstance(node_object, Vehicle):
+    if isinstance(node_object, Vehicle) or isinstance(node_object, ChargingOpportunity):
         return node_object.get_edge()
     if isinstance(node_object, Reservation):
         if node_object.is_from_node(node):
@@ -312,6 +347,8 @@ def get_demand_of_node_object(node_object: NodeObject, node: int) -> int | None:
             return 1
         if node_object.is_to_node(node):
             return -1
+    if isinstance(node_object, ChargingOpportunity):
+        return 0
     return None
 
 
@@ -402,6 +439,8 @@ def get_time_window_of_node_object(node_object: NodeObject, node: int, end: int)
             else:
                 dropoff_latest = max_time
             time_window = (current_time, dropoff_latest)
+    elif isinstance(node_object, ChargingOpportunity):
+        time_window = (current_time, max_time)
     else:
         raise ValueError(f"Cannot set time window for node {node}.")
     return time_window
