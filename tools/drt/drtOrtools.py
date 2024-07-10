@@ -68,6 +68,7 @@ def create_data_model(sumo_fleet: list[str], cost_type: orToolsDataModel.CostTyp
                       drf: float, waiting_time: int, end: int,
                       fix_allocation: bool, solution_requests: TranslatedSolutions | None, penalty_factor: str | int,
                       data_reservations: list[orToolsDataModel.Reservation],
+                      charging_opportunities: list[orToolsDataModel.ChargingOpportunity],
                       timestep: float, verbose: bool) -> orToolsDataModel.ORToolsDataModel:
     """Creates the data for the problem."""
     vehicles = orToolsDataModel.create_vehicles(sumo_fleet)
@@ -77,7 +78,7 @@ def create_data_model(sumo_fleet: list[str], cost_type: orToolsDataModel.CostTyp
     reservations, rejected_reservations = orToolsDataModel.reject_late_reservations(
         reservations, waiting_time, timestep)
     orToolsDataModel.map_vehicles_to_reservations(vehicles, reservations)
-    node_objects = orToolsDataModel.create_nodes(reservations, vehicles)
+    node_objects = orToolsDataModel.create_nodes(reservations, vehicles, charging_opportunities)
 
     n_vehicles = len(vehicles)
     if verbose:
@@ -211,7 +212,8 @@ def solution_by_requests(solution_ortools: ortools_pdp.ORToolsSolution | None,
 
 def run(penalty_factor: str | int, end: int = None, interval: int = 30, time_limit: float = 10,
         cost_type: orToolsDataModel.CostType = orToolsDataModel.CostType.DISTANCE,
-        drf: float = 1.5, waiting_time: int = 900, fix_allocation: bool = False, verbose: bool = False):
+        drf: float = 1.5, waiting_time: int = 900, number_charging_duplicates: int = 0, fix_allocation: bool = False,
+        verbose: bool = False):
     """
     Execute the TraCI control loop and run the scenario.
 
@@ -245,6 +247,7 @@ def run(penalty_factor: str | int, end: int = None, interval: int = 30, time_lim
         print(f'  cost_type: {cost_type}')
         print(f'  drf: {drf}')
         print(f'  waiting_time: {waiting_time}')
+        print(f'  number_charging_duplicates: {number_charging_duplicates}')
         print(f'  fix_allocation: {fix_allocation}')
 
     solution_requests = None
@@ -289,6 +292,7 @@ def run(penalty_factor: str | int, end: int = None, interval: int = 30, time_lim
         fleet = traci.vehicle.getTaxiFleet(-1)
         # take reservations, that are not assigned to a taxi (state 1: new + state 2: already retrieved)
         reservations_not_assigned = traci.person.getTaxiReservations(3)
+        charging_opportunities = orToolsDataModel.create_charging_opportunities(number_charging_duplicates, fleet)
 
         # if reservations_all:  # used for debugging
         if reservations_not_assigned:
@@ -298,7 +302,7 @@ def run(penalty_factor: str | int, end: int = None, interval: int = 30, time_lim
                 print('Start creating the model.')
             data = create_data_model(fleet, cost_type, drf, waiting_time, int(end),
                                      fix_allocation, solution_requests, penalty_factor,
-                                     data_reservations, timestep, verbose)
+                                     data_reservations, charging_opportunities, timestep, verbose)
             data_reservations = data.reservations
             solution_requests = dispatch(time_limit, solution_requests, data, verbose)
             if solution_requests is not None:
@@ -358,6 +362,8 @@ def get_arguments() -> argparse.Namespace:
                     help="maximum waiting time to serve a request in s")
     ap.add_argument("-p", "--penalty-factor", type=dynamic_or_int, default=PENALTY_FACTOR,
                     help="factor on penalty for rejecting requests, must be 'dynamic' or an integer (e.g. 100000)")
+    ap.add_argument("--number-charging-duplicates", type=int, default=0,
+                    help="number of times each charging station is used in the route plan")
     ap.add_argument("--trace-file", type=ap.file,
                     help="log file for TraCI debugging")
     return ap.parse_args()
@@ -399,4 +405,4 @@ if __name__ == "__main__":
 
     run(arguments.penalty_factor, arguments.end, arguments.interval,
         arguments.time_limit, arguments.cost_type, arguments.drf,
-        arguments.waiting_time, arguments.fix_allocation, arguments.verbose)
+        arguments.waiting_time, arguments.number_charging_duplicates, arguments.fix_allocation, arguments.verbose)
