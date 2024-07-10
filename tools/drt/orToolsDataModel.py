@@ -66,6 +66,18 @@ class Vehicle:
     def get_person_id_list(self) -> list[str]:
         return traci.vehicle.getPersonIDList(self.id_vehicle)
 
+    def get_energy_capacity(self, include_charging: bool) -> int:
+        if include_charging:
+            return int(float(traci.vehicle.getParameter(self.id_vehicle, 'device.battery.maximumBatteryCapacity')))
+        else:
+            return 0
+
+    def get_current_energy(self, include_charging: bool) -> int:
+        if include_charging:
+            return int(float(traci.vehicle.getParameter(self.id_vehicle, 'device.battery.actualBatteryCapacity')))
+        else:
+            return 0
+
 
 @dataclass
 class Reservation:
@@ -139,6 +151,7 @@ class Reservation:
 @dataclass
 class ChargingOpportunity:
     id_charging_station: int
+    available_energy: int
     charging_time: int
     node: int = None
     vehicle: Vehicle = None
@@ -162,7 +175,9 @@ class ORToolsDataModel:
     starts: list[int]
     ends: list[int]
     demands: list[int]
+    available_energy: list[int]
     vehicle_capacities: list[int]
+    energy_capacities: list[int]
     drf: float
     waiting_time: int
     time_windows: list[(int, int)]
@@ -171,6 +186,7 @@ class ORToolsDataModel:
     initial_routes: dict[int: list[list[int]]]
     penalty: int
     reservations: list[Reservation]
+    charging_opportunities: list[ChargingOpportunity]
     vehicles: list[Vehicle]
     cost_type: CostType
 
@@ -257,6 +273,7 @@ def create_charging_opportunities(number_charging_duplicates: int, fleet: list[s
             for i in range(number_charging_duplicates):
                 charging_opp = ChargingOpportunity(
                     id_charging_station=cs,
+                    available_energy=max(energy_capacities),
                     charging_time=charging_duration,
                 )
                 charging_opportunities.append(charging_opp)
@@ -350,6 +367,16 @@ def get_demand_of_node_object(node_object: NodeObject, node: int) -> int | None:
     if isinstance(node_object, ChargingOpportunity):
         return 0
     return None
+
+
+def get_available_energy_of_node_object(node_object: NodeObject, include_energy: bool) -> int:
+    if (isinstance(node_object, str) and node_object == 'depot'
+            or isinstance(node_object, Reservation)):
+        return 0
+    if isinstance(node_object, Vehicle):
+        return node_object.get_current_energy(include_energy)
+    if isinstance(node_object, ChargingOpportunity):
+        return node_object.available_energy
 
 
 # TODO: If cost_type is TIME, remove cost_matrix and cost_dict.

@@ -71,6 +71,7 @@ def create_data_model(sumo_fleet: list[str], cost_type: orToolsDataModel.CostTyp
                       charging_opportunities: list[orToolsDataModel.ChargingOpportunity],
                       timestep: float, verbose: bool) -> orToolsDataModel.ORToolsDataModel:
     """Creates the data for the problem."""
+    include_charging = charging_opportunities != []
     vehicles = orToolsDataModel.create_vehicles(sumo_fleet)
     updated_reservations = orToolsDataModel.update_reservations(data_reservations)
     new_reservations = orToolsDataModel.create_new_reservations(updated_reservations)
@@ -97,6 +98,7 @@ def create_data_model(sumo_fleet: list[str], cost_type: orToolsDataModel.CostTyp
                 print(f'Drop-off of reservation {reservation.get_id()} at edge {reservation.get_to_edge()}')
 
     vehicle_capacities = [veh.get_person_capacity() for veh in vehicles]
+    energy_capacities = [veh.get_energy_capacity(include_charging) for veh in vehicles]
 
     types_vehicle = [veh.get_type_ID() for veh in vehicles]
     types_vehicles_unique = list(set(types_vehicle))
@@ -132,6 +134,8 @@ def create_data_model(sumo_fleet: list[str], cost_type: orToolsDataModel.CostTyp
 
     demands = [orToolsDataModel.get_demand_of_node_object(node_object, node)
                for node, node_object in enumerate(node_objects)]
+    available_energy = [orToolsDataModel.get_available_energy_of_node_object(node_object, include_charging)
+                        for node, node_object in enumerate(node_objects)]
 
     # get time windows
     time_windows = [orToolsDataModel.get_time_window_of_node_object(node_object, node, end)
@@ -151,7 +155,9 @@ def create_data_model(sumo_fleet: list[str], cost_type: orToolsDataModel.CostTyp
         starts=start_nodes,
         ends=n_vehicles * [0],  # end at 'depot', which is is anywere
         demands=demands,  # [0] + n_dp_reservations*[1] + n_dp_reservations*[-1] + n_do_reservations*[-1] + veh_demand
+        available_energy=available_energy,
         vehicle_capacities=vehicle_capacities,
+        energy_capacities=energy_capacities,
         drf=drf,
         waiting_time=waiting_time,
         time_windows=time_windows,
@@ -160,6 +166,7 @@ def create_data_model(sumo_fleet: list[str], cost_type: orToolsDataModel.CostTyp
         initial_routes=solution_requests,
         penalty=penalty,
         reservations=reservations,
+        charging_opportunities=charging_opportunities,
         vehicles=vehicles,
         cost_type=cost_type
     )
@@ -362,6 +369,8 @@ def get_arguments() -> argparse.Namespace:
                     help="maximum waiting time to serve a request in s")
     ap.add_argument("-p", "--penalty-factor", type=dynamic_or_int, default=PENALTY_FACTOR,
                     help="factor on penalty for rejecting requests, must be 'dynamic' or an integer (e.g. 100000)")
+    ap.add_argument("--include-charging", action="store_true", default=False,
+                    help="enables energy consumption tracking and recharging of vehicles")
     ap.add_argument("--number-charging-duplicates", type=int, default=0,
                     help="number of times each charging station is used in the route plan")
     ap.add_argument("--trace-file", type=ap.file,
