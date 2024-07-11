@@ -267,6 +267,7 @@ def run(penalty_factor: str | int, end: int = None, interval: int = 30, time_lim
 
     solution_requests = None
     data_reservations = list()
+    charging_opportunities = list()
     while running:
 
         traci.simulationStep(timestep)
@@ -307,7 +308,8 @@ def run(penalty_factor: str | int, end: int = None, interval: int = 30, time_lim
         fleet = traci.vehicle.getTaxiFleet(-1)
         # take reservations, that are not assigned to a taxi (state 1: new + state 2: already retrieved)
         reservations_not_assigned = traci.person.getTaxiReservations(3)
-        charging_opportunities = orToolsDataModel.create_charging_opportunities(number_charging_duplicates, fleet)
+        if number_charging_duplicates > 0 and not charging_opportunities:
+            charging_opportunities = orToolsDataModel.create_charging_opportunities(number_charging_duplicates, fleet)
 
         # if reservations_all:  # used for debugging
         if reservations_not_assigned:
