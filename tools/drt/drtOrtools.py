@@ -175,7 +175,8 @@ def create_data_model(sumo_fleet: list[str], cost_type: orToolsDataModel.CostTyp
         reservations=reservations,
         charging_opportunities=charging_opportunities,
         vehicles=vehicles,
-        cost_type=cost_type
+        cost_type=cost_type,
+        include_charging=include_charging,
     )
     return data
 

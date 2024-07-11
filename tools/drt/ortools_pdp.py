@@ -280,12 +280,15 @@ def add_capacity_constraint(data: orToolsDataModel.ORToolsDataModel,
         from_node = manager.IndexToNode(from_index)
         return data.demands[from_node]
     demand_callback_index = routing.RegisterUnaryTransitCallback(demand_callback)
+    dimension_name = 'Capacity'
     routing.AddDimensionWithVehicleCapacity(
         demand_callback_index,
         0,  # null capacity slack
         data.vehicle_capacities,  # vehicle maximum capacities
         True,  # start cumul to zero
-        'Capacity')
+        dimension_name)
+    capacity_dimension = routing.GetDimensionOrDie(dimension_name)
+    return capacity_dimension
 
 
 def create_time_dimension(data: orToolsDataModel.ORToolsDataModel,
@@ -394,6 +397,93 @@ def add_waiting_time_constraints(data: orToolsDataModel.ORToolsDataModel,
                 100*data.get_penalty(True))  # cost = coefficient * (cumulVar - maximum_pickup_time)
             if verbose:
                 print(f"reservation {request.get_id()} has a maximum (soft) pickup time at {maximum_pickup_time}")
+
+
+def create_energy_dimension(data: orToolsDataModel.ORToolsDataModel,
+                            routing: pywrapcp.RoutingModel,
+                            manager: pywrapcp.RoutingIndexManager,
+                            verbose: bool):
+    # Recharging follows example from
+    # https://github.com/google/or-tools/blob/stable/ortools/constraint_solver/samples/cvrp_reload.py
+    if verbose:
+        print(' Create energy dimension.')
+
+    def energy_callback(from_index, to_index):
+        """Returns the energy used for travelling between the two nodes."""
+        # Convert from routing variable Index to time matrix NodeIndex.
+        from_node = manager.IndexToNode(from_index)
+        to_node = manager.IndexToNode(to_index)
+        return data.energy_matrix[from_node][to_node]
+
+    energy_callback_index = routing.RegisterTransitCallback(energy_callback)
+
+    dimension_name = 'Energy'
+    routing.AddDimensionWithVehicleCapacity(
+        energy_callback_index,
+        10000000, #max(data['available_energy']),  # Slack: Maximal available_energy for recharging # Todo Philipp: Replace this with "unlimited" instead of magic number
+        [10000000, 10000000], #data['energy_capacities'],  # maximum energy_capacity per vehicle # Todo Philipp: Replace this with "unlimited" instead of magic number
+        False,  # Don't force start cumul to zero.
+        dimension_name)
+    energy_dimension = routing.GetDimensionOrDie(dimension_name)
+
+    # Add Slack for resetting energy to max at charging stations.
+    # Note that we have to fix the slack and not just give an upper bound to ensure correctness
+    # e.g. vehicle with used energy 5/15 travels for 1 energy to charging station, then for 2 energy away from it
+    # CumulVar(cs) = 5 + 1 + 0 = 6
+    # CumulVar(after_cs) = 6 + (2-15)[travel-charge; in energy_matrix] + 9[slack] = 2
+    # Other nodes will be set to 0 slack (energy consumption is fixed by travel).
+    for co in data.charging_opportunities:
+        index = manager.NodeToIndex(co.node)
+        energy_dimension.SlackVar(index).SetMax(co.available_energy)
+        # Todo Philipp: This only works as long as we charge to full
+        routing.solver().Add(energy_dimension.SlackVar(index) == co.available_energy - energy_dimension.CumulVar(index))
+        # Visiting charging opportunities is optional
+        # In particular we assume no passengers can enter/exit at charging opportunities
+        # routing.AddDisjunction([index], 1)
+        routing.AddToAssignment(energy_dimension.SlackVar(index))
+    for vehicle in data.vehicles:
+        # Start CumulVar with the used energy, no slack needed
+        index = manager.NodeToIndex(vehicle.start_node)
+        energy_dimension.CumulVar(index).SetValue(vehicle.get_energy_capacity(True) - vehicle.get_current_energy(True))
+        energy_dimension.SlackVar(index).SetValue(0)
+        routing.AddToAssignment(energy_dimension.SlackVar(index))
+    for res in data.pickups_deliveries:
+        index = manager.NodeToIndex(res.from_node)
+        energy_dimension.SlackVar(index).SetValue(0)
+        index = manager.NodeToIndex(res.to_node)
+        energy_dimension.SlackVar(index).SetValue(0)
+        routing.AddToAssignment(energy_dimension.SlackVar(index))
+    return energy_dimension
+
+
+def add_soft_minimal_energy_constraints(data: orToolsDataModel.ORToolsDataModel,
+                                        energy_dimension: pywrapcp.RoutingDimension,
+                                        manager: pywrapcp.RoutingIndexManager):
+    for node in range(len(data.available_energy)):
+        if node == data.depot:
+            continue
+        index = manager.NodeToIndex(node)
+        # Punish plans that would bring the vehicle below 20% remaining charge
+        # Since simulation can differ from plan, vehicles may otherwise "strand"
+        if node not in data.starts:
+            energy_dimension.SetCumulVarSoftUpperBound(
+                index,
+                int(0.8*max(data.energy_capacities)),
+                10000000  # cost = coefficient * (cumulVar - critical_charge_level)
+            )
+            # energy_dimension.SetCumulVarSoftUpperBound(
+            #     index,
+            #     int(0.9 * max(data.energy_capacities)),
+            #     100000  # cost = coefficient * (cumulVar - critical_charge_level)
+            # )
+
+
+def restrict_charging_to_unoccupied_vehicles_constraint(data: orToolsDataModel.ORToolsDataModel,
+                                                        capacity_dimension: pywrapcp.RoutingDimension,
+                                                        manager: pywrapcp.RoutingIndexManager):
+    for co in data.charging_opportunities:
+        index = manager.NodeToIndex(co.node)
+        capacity_dimension.CumulVar(index).SetMax(0)
 
 
 def solve_from_initial_solution(routing: pywrapcp.RoutingModel, manager: pywrapcp.RoutingIndexManager,
@@ -518,7 +608,7 @@ def main(data: orToolsDataModel.ORToolsDataModel,
         add_allocation_constraint(data, routing, manager, verbose)
 
     # Add Capacity constraint.
-    add_capacity_constraint(data, routing, manager, verbose)
+    capacity_dimension = add_capacity_constraint(data, routing, manager, verbose)
 
     # Add time window constraints.
     add_time_windows_constraint(data, time_dimension, manager, verbose)
@@ -526,9 +616,24 @@ def main(data: orToolsDataModel.ORToolsDataModel,
     # Add waiting time constraints.
     add_waiting_time_constraints(data, manager, time_dimension, verbose)
 
-    print('## Done')
     # Setting first solution heuristic.
     search_parameters = set_first_solution_heuristic(time_limit_seconds, verbose)
+
+    # Add all constraints belonging to energy tracking
+    if data.include_charging:
+        # Add dimension for used energy
+        energy_dimension = create_energy_dimension(data, routing, manager, verbose)
+
+        #for v in range(data['num_vehicles']):
+        #    routing.SetVehicleUsedWhenEmpty(True, v)
+
+        # Add penalty for planning trips with very low energy levels
+        add_soft_minimal_energy_constraints(data, energy_dimension, manager)
+
+        # May only charge if there are no passengers in vehicle
+        restrict_charging_to_unoccupied_vehicles_constraint(data, capacity_dimension, manager)
+
+    print('## Model setup done')
 
     # Solve the problem.
     if verbose:
@@ -539,6 +644,24 @@ def main(data: orToolsDataModel.ORToolsDataModel,
     else:
         solution = routing.SolveWithParameters(search_parameters)
 #    solution = routing.SolveWithParameters(search_parameters)
+
+    print(f'## Optimization done, optimization status: {routing.status()}')
+    # Todo Philipp: Clean this up or remove it
+    # if solution and data.include_charging:
+    #     for node in data.starts:
+    #         index = manager.NodeToIndex(node)
+    #         print(f'Initial charge (in node {node}): {energy_dimension.CumulVar(index)}')
+    #     for co in data.charging_opportunities:
+    #         index = manager.NodeToIndex(co.node)
+    #     for node, energy in enumerate(data['available_energy']):
+    #         if True:# Todo Philipp: Activate energy_dimension printing only when Energy is active
+    #             index = manager.NodeToIndex(node)
+    #             if node in data['starts']:
+    #                 print(f'Initial charge (in node {node}): {energy}')
+    #             elif energy > 0:
+    #                 planned_charging = solution.Value(energy_dimension.CumulVar(index))
+    #                 suffix = '############ MAX CHARGE EXCEEDED ############' if planned_charging > 70000 else ''
+    #                 print(f'Node {node}: Planned charging {planned_charging} / {energy} {suffix}')
 
     if solution:
         return get_solution(data, manager, routing, solution, verbose)

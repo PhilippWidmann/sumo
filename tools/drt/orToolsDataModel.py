@@ -190,6 +190,7 @@ class ORToolsDataModel:
     charging_opportunities: list[ChargingOpportunity]
     vehicles: list[Vehicle]
     cost_type: CostType
+    include_charging: bool
 
     def __str__(self):
         return f'number of vehicles: {self.num_vehicles}, ...'
