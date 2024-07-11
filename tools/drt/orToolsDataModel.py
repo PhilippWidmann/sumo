@@ -537,7 +537,7 @@ def get_energy_consumption_estimate(fleet: list[str], include_charging: bool) ->
     for i, id_vehicle in enumerate(fleet):
         distances += [max(PREVIOUS_DISTANCES[i], traci.vehicle.getDistance(id_vehicle))]
         energy_used += float(traci.vehicle.getParameter(id_vehicle, "device.battery.totalEnergyConsumed"))
-    if sum(distances) < 100:
+    if sum(distances) < 10000:
         Wh_per_m = 0
     else:
         Wh_per_m = energy_used / sum(distances)
@@ -545,6 +545,7 @@ def get_energy_consumption_estimate(fleet: list[str], include_charging: bool) ->
     print(Wh_per_m)
     #return 1.5 # Todo Philipp: Remove this!
     return Wh_per_m
+
 
 def round_up_to_next_power_of_10(n: int) -> int:
     if n < 0:
