@@ -29,6 +29,8 @@ import os
 import sys
 import argparse
 
+import numpy as np
+
 import ortools_pdp
 import orToolsDataModel
 
@@ -44,7 +46,7 @@ PENALTY_FACTOR = 'dynamic'  # factor on penalty for rejecting requests
 
 
 # use 'type' statement in python version 3.12 or higher
-RequestOrder = List[str]
+RequestOrder = List[orToolsDataModel.Reservation | orToolsDataModel.ChargingOpportunity]
 Cost = int
 NodeOrder = List[int]
 TranslatedSolutions = Dict[int, Tuple[RequestOrder, Cost, NodeOrder]]
@@ -196,10 +198,12 @@ def solution_by_requests(solution_ortools: ortools_pdp.ORToolsSolution | None,
 
     route2request = {}
     for res in data.pickups_deliveries:
-        route2request[res.from_node] = res.get_id()
-        route2request[res.to_node] = res.get_id()
+        route2request[res.from_node] = res
+        route2request[res.to_node] = res
     for res in data.dropoffs:  # for each vehicle
-        route2request[res.to_node] = res.get_id()
+        route2request[res.to_node] = res
+    for co in data.charging_opportunities:
+        route2request[co.node] = co
 
     solution_requests: TranslatedSolutions = {}
     for key in solution_ortools:  # key is the vehicle number (0,1,...)
@@ -207,11 +211,9 @@ def solution_by_requests(solution_ortools: ortools_pdp.ORToolsSolution | None,
         node_order: NodeOrder = []
         for i_route in solution_ortools[key][0][1:-1]:  # take only the routes ([0]) without the start node ([1:-1])
             if i_route in route2request:
-                request_order.append(route2request[i_route])  # add request id to route
-                # [res for res in data["pickups_deliveries"]+data['dropoffs']
-                #      if res.get_id() == route2request[i_route]][0]  # get the reservation
-                res = orToolsDataModel.get_reservation_by_node(data.pickups_deliveries+data.dropoffs, i_route)
-                res.vehicle = orToolsDataModel.get_vehicle_by_vehicle_index(data.vehicles, key)
+                request = route2request[i_route]
+                request_order.append(request)  # add request id to route
+                request.vehicle = orToolsDataModel.get_vehicle_by_vehicle_index(data.vehicles, key)
             else:
                 if verbose:
                     print(f'!solution ignored: {i_route}')
@@ -320,13 +322,50 @@ def run(penalty_factor: str | int, end: int = None, interval: int = 30, time_lim
             if solution_requests is not None:
                 for index_vehicle, vehicle_requests in solution_requests.items():  # for each vehicle
                     id_vehicle = fleet[index_vehicle]
-                    reservations_order = [res_id for res_id in vehicle_requests[0]]  # [0] for route
+                    stops_before_dispatch = traci.vehicle.getStops(id_vehicle)  # Todo Philipp: remove debug
+                    # First, dispatch the taxi for all customer reservations
+                    reservations_order = [res.reservation.id for res in vehicle_requests[0]
+                                          if isinstance(res, orToolsDataModel.Reservation)]  # [0] for route
                     if verbose:
                         print(f"Dispatching {id_vehicle} with {reservations_order}")
                         print(f"Costs for {id_vehicle}: {vehicle_requests[1]}")
                     if fix_allocation and not reservations_order:  # ignore empty reservations if allocation is fixed
                         continue
                     traci.vehicle.dispatchTaxi(id_vehicle, reservations_order)  # overwrite existing dispatch
+                    stops_after_dispatch = traci.vehicle.getStops(id_vehicle)  # Todo Philipp: remove debug
+
+                    # Then, insert stops at charging stations
+                    charging_stops = [(i, co) for i, co in enumerate(vehicle_requests[0])
+                                      if isinstance(co, orToolsDataModel.ChargingOpportunity)]  # At what position to schedule the cs
+                    charging_stop_indices = [s[0] for s in charging_stops]
+                    charging_opps = [s[1] for s in charging_stops]
+                    for ind_cs, co in zip(charging_stop_indices, charging_opps):
+                        if ind_cs > 0:
+                            # Note: Dispatched reservations at the same station may have been grouped into one stop,
+                            # so we have to compute the correct position to insert the planned charging stops
+                            served_reservations = [len(stop_data.actType.split(','))
+                                                   for stop_data in traci.vehicle.getStops(id_vehicle)]
+                            cumulative_served_reservations = list(np.cumsum(served_reservations))
+                            # Before the charging stop, ind_cs reservations/other charging ops had to be carried out
+                            finished_previous_operations = [cum >= ind_cs for cum in cumulative_served_reservations]
+                            insertion_index = finished_previous_operations.index(True) + 1
+                            if verbose and cumulative_served_reservations[insertion_index-1] > ind_cs:
+                                # This can happen if the solver returns a suboptimal solution
+                                print('Warning: Charging was scheduled in the middle of a passenger stop. '
+                                      'Delayed to afterwards in the simulation.')
+                        else:
+                            insertion_index = 1 if traci.vehicle.isStopped(id_vehicle) else 0  # Todo Philipp: Evaluate if this is actually what we want
+
+                        traci.vehicle.insertStop(id_vehicle,
+                                                 insertion_index,
+                                                 edgeID=co.id_charging_station,
+                                                 flags=32,  # Interpret edgeID as a chargingStationID instead
+                                                 duration=co.charging_time)
+                        if verbose:
+                            print(f'Vehicle {id_vehicle}: Scheduled charging stop at {co.charging_station_id} '
+                                  f'(route position {insertion_index})')
+                    stops_after_cs_scheduling = traci.vehicle.getStops(id_vehicle)  # Todo Philipp: remove debug
+                    pass
             else:
                 if verbose:
                     print("Found no solution, continue...")

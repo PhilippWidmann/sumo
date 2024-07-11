@@ -406,38 +406,44 @@ def solve_from_initial_solution(routing: pywrapcp.RoutingModel, manager: pywrapc
         for index_vehicle in solution_requests:
             # use request ids ([0]) here and align with current status of the requests
             request_order = solution_requests[index_vehicle][0].copy()
-            for request_id in set(solution_requests[index_vehicle][0]):
+            for request_object in solution_requests[index_vehicle][0]:
+                if not isinstance(request_object, orToolsDataModel.Reservation):
+                    continue
+                # Check if some reservations have been completed and must be removed from the initial route
                 # 0: done
                 # 1: only drop-off left
                 # 2: pick-up and drop-off left
-                old_status = solution_requests[index_vehicle][0].count(request_id)
-                new_status = 0
-                if request_id in [req.get_id() for req in data.pickups_deliveries]:
+                old_status = solution_requests[index_vehicle][0].count(request_object)
+                if request_object in data.pickups_deliveries:
                     new_status = 2
-                elif request_id in [req.get_id() for req in data.dropoffs]:
+                elif request_object in data.dropoffs:
                     new_status = 1
+                else:
+                    new_status = 0
                 if new_status == 0:
                     # remove complete request
-                    request_order = [req for req in request_order if req != request_id]
+                    request_order = [req for req in request_order if req != request_object]
                 if old_status == 2 and new_status == 1:
-                    # remove first occurance of the request
-                    request_order.remove(request_id)
+                    # remove first occurrence of the request
+                    request_order.remove(request_object)
             # translate new requests order (ids) to nodes order
             # (e.g. [0,1,2,1,2] -> [0.to_node, 1.from_node, 2.from_node, 1.to_node, 2.to_node])
-            request_id_set = set(request_order)  # e.g. [0,1,2]
-            # first occurance from behind (will be "to_node")
-            reverserd_request_order = request_order.copy()
-            reverserd_request_order.reverse()  # e.g. [2,1,2,1,0]
-            first_occurance_from_behind = [reverserd_request_order.index(id) for id in request_id_set]  # e.g. [0,1,4]
+            # first occurrence from behind (will be "to_node")
+            reversed_request_order = request_order.copy()
+            reversed_request_order.reverse()  # e.g. [2,1,2,1,0]
+            first_occurrence_from_behind = set([reversed_request_order.index(req)
+                                                for req in request_order])  # e.g. [0,1,4]
             all_requests = data.pickups_deliveries.copy()
             all_requests.extend(data.dropoffs.copy())
             nodes_order = []
-            for index, req_id in enumerate(reverserd_request_order):
-                req = [r for r in all_requests if r.get_id() == req_id][0]
-                if index in first_occurance_from_behind:
-                    nodes_order.insert(0, manager.NodeToIndex(req.to_node))
+            for index, req in enumerate(reversed_request_order):
+                if isinstance(req, orToolsDataModel.Reservation):
+                    if index in first_occurrence_from_behind:
+                        nodes_order.insert(0, manager.NodeToIndex(req.to_node))
+                    else:
+                        nodes_order.insert(0, manager.NodeToIndex(req.from_node))
                 else:
-                    nodes_order.insert(0, manager.NodeToIndex(req.from_node))
+                    nodes_order.insert(0, manager.NodeToIndex(req.node))
             # nodes_order = solution_requests[index_vehicle][2]  # [2] for nodes
             initial_routes.append(nodes_order)
     routing.CloseModelWithParameters(search_parameters)
