@@ -169,6 +169,7 @@ class ORToolsDataModel:
     depot: int
     cost_matrix: list[list[int]]
     time_matrix: list[list[int]]
+    energy_matrix: list[list[int]]
     pickups_deliveries: list[Reservation]
     dropoffs: list[Reservation]
     num_vehicles: int
@@ -380,7 +381,7 @@ def get_available_energy_of_node_object(node_object: NodeObject, include_energy:
 
 
 # TODO: If cost_type is TIME, remove cost_matrix and cost_dict.
-def get_cost_matrix(node_objects: list[NodeObject], cost_type: CostType):
+def get_cost_matrix(node_objects: list[NodeObject], cost_type: CostType, include_charging: bool):
     """Get cost matrix between edges.
     Index in cost matrix is the same as the node index of the constraint solver."""
 
@@ -394,47 +395,72 @@ def get_cost_matrix(node_objects: list[NodeObject], cost_type: CostType):
     pickUpDuration = 0 if pickUpDuration_param == '' else round(float(pickUpDuration_param))
     dropOffDuration_param = traci.vehicle.getParameter(id_vehicle, 'device.taxi.dropOffDuration')
     dropOffDuration = 0 if dropOffDuration_param == '' else round(float(dropOffDuration_param))
+    # estimate average energy consumption using all vehicles
+    vehicle_ids = [v.id_vehicle for v in node_objects if isinstance(v, Vehicle)]
+    energy_consumption_estimate = get_energy_consumption_estimate(vehicle_ids, include_charging)
+
     n_edges = len(node_objects)
     time_matrix = np.zeros([n_edges, n_edges], dtype=int)
     cost_matrix = np.zeros([n_edges, n_edges], dtype=int)
-    time_dict = {}
-    cost_dict = {}
-    # TODO initialize cost_dict and time_dict{} in run() and update for speed improvement
+    energy_matrix = np.zeros([n_edges, n_edges], dtype=int)
+    travel_time_dict = {}
+    travel_distance_dict = {}
+    # TODO initialize travel_distance_dict and travel_time_dict{} in run() and update for speed improvement
     for ii, from_node_object in enumerate(node_objects):
         edge_from = get_edge_of_node_object(from_node_object, ii)
         for jj, to_node_object in enumerate(node_objects):
             edge_to = get_edge_of_node_object(to_node_object, jj)
             # cost to depot should be always 0
             # (means there is no way to depot in the end)
-            if from_node_object == 'depot' or to_node_object == 'depot':
+            if ii == jj or from_node_object == 'depot' or to_node_object == 'depot':
                 time_matrix[ii][jj] = 0
                 cost_matrix[ii][jj] = 0
+                energy_matrix[ii][jj] = 0
                 continue
-            if ii == jj:
-                time_matrix[ii][jj] = 0
-                cost_matrix[ii][jj] = 0
-                continue
-            if (edge_from, edge_to) in cost_dict:
-                # get costs from previous call
-                time_matrix[ii][jj] = time_dict[(edge_from, edge_to)]
-                cost_matrix[ii][jj] = cost_dict[(edge_from, edge_to)]
-                continue
-            # TODO: findRoute is not needed between two vehicles
-            route: traci._simulation.Stage = traci.simulation.findRoute(edge_from, edge_to, vType=type_vehicle)
-            time_matrix[ii][jj] = round(route.travelTime)
-            if isinstance(from_node_object, Reservation) and from_node_object.is_from_node(ii):
-                time_matrix[ii][jj] += pickUpDuration  # add pickup_duration
-                time_matrix[ii][jj] += boardingDuration  # add boarding_duration
-            if isinstance(to_node_object, Reservation) and to_node_object.is_to_node(jj):
-                time_matrix[ii][jj] += dropOffDuration  # add dropoff_duration
-            time_dict[(edge_from, edge_to)] = time_matrix[ii][jj]
+
+            # Compute and save travel time/distance if the combination of edges is new
+            if (edge_from, edge_to) not in travel_time_dict:
+                if edge_from == edge_to:
+                    # This assumes that there is only one stopping point per edge and thus no travel is necessary
+                    # as passengers are picked up/dropped off from the same place.
+                    # Todo Philipp: This assumption makes sense for trains, but check for buses etc.
+                    travel_time_dict[(edge_from, edge_to)] = 0
+                    travel_distance_dict[(edge_from, edge_to)] = 0
+                else:
+                    route: traci._simulation.Stage = traci.simulation.findRoute(edge_from, edge_to,
+                                                                                vType=type_vehicle)
+                    travel_time_dict[(edge_from, edge_to)] = round(route.travelTime)
+                    travel_distance_dict[(edge_from, edge_to)] = round(route.length)
+
+            # Initialize matrices with baseline travel time
+            time_matrix[ii][jj] = travel_time_dict[(edge_from, edge_to)]
+            energy_matrix[ii][jj] = round(travel_distance_dict[(edge_from, edge_to)] * energy_consumption_estimate)
+
+            # Add time at stop jj (depends on node, not just edge; so do not save this in travel_time_dict)
+            # All stopping times are added to the travel time of the preceding edge
+            if isinstance(to_node_object, Reservation):
+                # Note: SUMO combines pickup and drop-off time of multiple reservations at the same stop,
+                # but boardingTime is always added per entering/exiting passenger
+                if edge_from == edge_to:
+                    # fix stopping time was already added at the previous node
+                    fix_stopping_time_jj = 0
+                elif to_node_object.is_to_node(jj):
+                    fix_stopping_time_jj = dropOffDuration
+                elif to_node_object.is_from_node(jj):
+                    fix_stopping_time_jj = pickUpDuration
+                else:
+                    raise ValueError('Node object is a reservation, but neither the from nor to node. '
+                                     'This should not happen.')
+                time_matrix[ii][jj] += max(fix_stopping_time_jj, boardingDuration)
+            if isinstance(from_node_object, ChargingOpportunity):
+                time_matrix[ii][jj] += from_node_object.charging_time
+                energy_matrix[ii][jj] -= from_node_object.available_energy
+
             if cost_type == CostType.TIME:
                 cost_matrix[ii][jj] = time_matrix[ii][jj]
-                cost_dict[(edge_from, edge_to)] = time_dict[(edge_from, edge_to)]
             elif cost_type == CostType.DISTANCE:
-                cost_matrix[ii][jj] = round(route.length)
-                cost_dict[(edge_from, edge_to)] = round(route.length)
-    return cost_matrix.tolist(), time_matrix.tolist()
+                cost_matrix[ii][jj] = travel_distance_dict[(edge_from, edge_to)]
+    return cost_matrix.tolist(), time_matrix.tolist(), energy_matrix.tolist()
 
 
 def get_time_window_of_node_object(node_object: NodeObject, node: int, end: int) -> tuple[int, int]:
@@ -494,6 +520,30 @@ def get_penalty(penalty_factor: str | int, cost_matrix: list[list[int]]) -> int:
     else:
         return penalty_factor
 
+
+# Todo Philipp: This global var is a hacky workaround for keeping previous values
+#     because the distance counter returns error values for parked vehicles
+PREVIOUS_DISTANCES = None
+def get_energy_consumption_estimate(fleet: list[str], include_charging: bool) -> float:
+    if not include_charging:
+        return 0
+    global PREVIOUS_DISTANCES
+    if PREVIOUS_DISTANCES is None:
+        PREVIOUS_DISTANCES = [0] * len(fleet)
+
+    distances = []
+    energy_used = 0
+    for i, id_vehicle in enumerate(fleet):
+        distances += [max(PREVIOUS_DISTANCES[i], traci.vehicle.getDistance(id_vehicle))]
+        energy_used += float(traci.vehicle.getParameter(id_vehicle, "device.battery.totalEnergyConsumed"))
+    if sum(distances) < 100:
+        Wh_per_m = 0
+    else:
+        Wh_per_m = energy_used / sum(distances)
+    PREVIOUS_DISTANCES = distances
+    print(Wh_per_m)
+    #return 1.5 # Todo Philipp: Remove this!
+    return Wh_per_m
 
 def round_up_to_next_power_of_10(n: int) -> int:
     if n < 0:
