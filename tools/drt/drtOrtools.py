@@ -107,7 +107,8 @@ def create_data_model(sumo_fleet: list[str], cost_type: orToolsDataModel.CostTyp
         # TODO support more than one vehicle type
     else:
         type_vehicle = types_vehicles_unique[0]
-    cost_matrix, time_matrix = orToolsDataModel.get_cost_matrix(node_objects, cost_type)
+    cost_matrix, time_matrix, energy_matrix = \
+        orToolsDataModel.get_cost_matrix(node_objects, cost_type, include_charging)
 
     # safe cost and time matrix
     if verbose:
@@ -118,6 +119,9 @@ def create_data_model(sumo_fleet: list[str], cost_type: orToolsDataModel.CostTyp
         with open("time_matrix.csv", 'a') as time_file:
             wr = csv.writer(time_file)
             wr.writerows(time_matrix)
+        with open("energy_matrix.csv", 'a') as energy_file:
+            wr = csv.writer(energy_file)
+            wr.writerows(energy_matrix)
 
     # add "direct route cost" to the requests:
     for reservation in reservations:
@@ -149,11 +153,12 @@ def create_data_model(sumo_fleet: list[str], cost_type: orToolsDataModel.CostTyp
         depot=0,
         cost_matrix=cost_matrix,
         time_matrix=time_matrix,
+        energy_matrix=energy_matrix,
         pickups_deliveries=[res for res in reservations if not res.is_picked_up()],  # dp_reservations
         dropoffs=[res for res in reservations if res.is_picked_up()],  # do_reservations
         num_vehicles=n_vehicles,
         starts=start_nodes,
-        ends=n_vehicles * [0],  # end at 'depot', which is is anywere
+        ends=n_vehicles * [0],  # end at 'depot', which is is anywhere
         demands=demands,  # [0] + n_dp_reservations*[1] + n_dp_reservations*[-1] + n_do_reservations*[-1] + veh_demand
         available_energy=available_energy,
         vehicle_capacities=vehicle_capacities,
