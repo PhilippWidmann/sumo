@@ -437,7 +437,7 @@ def create_energy_dimension(data: orToolsDataModel.ORToolsDataModel,
         index = manager.NodeToIndex(co.node)
         energy_dimension.SlackVar(index).SetMax(co.available_energy)
         # Todo Philipp: This only works as long as we charge to full
-        routing.solver().Add(energy_dimension.SlackVar(index) == co.available_energy - energy_dimension.CumulVar(index))
+        routing.solver().Add(energy_dimension.SlackVar(index) >= co.available_energy - energy_dimension.CumulVar(index))
         # Visiting charging opportunities is optional
         # In particular we assume no passengers can enter/exit at charging opportunities
         # routing.AddDisjunction([index], 1)
