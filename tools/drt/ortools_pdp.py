@@ -580,7 +580,8 @@ def set_first_solution_heuristic(time_limit_seconds: int, verbose: bool) -> any:
 
 
 def main(data: orToolsDataModel.ORToolsDataModel,
-         time_limit_seconds: int = 10, verbose: bool = False) -> ORToolsSolution | None:
+         time_limit_seconds: int = 10, verbose: bool = False, simplified_resolve: bool = False,
+         ) -> ORToolsSolution | None:
     """Entry point of the program."""
     # Create the routing index manager.
     manager = pywrapcp.RoutingIndexManager(
@@ -642,8 +643,6 @@ def main(data: orToolsDataModel.ORToolsDataModel,
         # May only charge if there are no passengers in vehicle
         restrict_charging_to_unoccupied_vehicles_constraint(data, capacity_dimension, manager)
 
-    print('## Model setup done')
-
     # Solve the problem.
     if verbose:
         print('Start solving the problem.')
@@ -654,7 +653,29 @@ def main(data: orToolsDataModel.ORToolsDataModel,
         solution = routing.SolveWithParameters(search_parameters)
 #    solution = routing.SolveWithParameters(search_parameters)
 
+    # Status codes: https://developers.google.com/optimization/routing/routing_options#search_status
+    # Not listed is 7, which from some research should correspond to "global optimum found"
     print(f'## Optimization done, optimization status: {routing.status()}')
+    if routing.status() not in [1, 7]:  # [local opt, global opt]
+        # If the heuristic cannot find a solution due to the added complexity of charging,
+        # maybe it helps to ignore this and find a feasible solution without charging first.
+        if data.include_charging and not simplified_resolve:
+            print('+++ Retrying without energy constraints +++')
+            data.include_charging = False
+            # data.initial_routes = None
+            solution_without_energy = main(data, time_limit_seconds, verbose, simplified_resolve=True)
+            if solution_without_energy is not None:
+                print('+++ Success; using solution without energy as initial solution +++')
+                from drtOrtools import solution_by_requests
+                solution_without_energy = solution_by_requests(solution_without_energy, data)
+                data.include_charging = True
+                data.initial_routes = solution_without_energy
+                solution = main(data, time_limit_seconds, verbose, simplified_resolve=True)
+                return solution
+            else:
+                print('+++ Cannot find a solution even ignoring energy. +++')
+        else:
+            print('***** Routing optimization failed in some way *****')
     # Todo Philipp: Clean this up or remove it
     # if solution and data.include_charging:
     #     for node in data.starts:
