@@ -254,6 +254,8 @@ def create_nodes(reservations: list[Reservation], vehicles: list[Vehicle],
             node_objects.append(res)
             res.from_node = n
             n += 1
+        else:
+            res.from_node = None  # for clarity in debug
         node_objects.append(res)
         res.to_node = n
         n += 1
@@ -413,8 +415,8 @@ def get_cost_matrix(node_objects: list[NodeObject], cost_type: CostType, include
     dropOffDuration_param = traci.vehicle.getParameter(id_vehicle, 'device.taxi.dropOffDuration')
     dropOffDuration = 0 if dropOffDuration_param == '' else round(float(dropOffDuration_param))
     # estimate average energy consumption using all vehicles
-    vehicle_ids = [v.id_vehicle for v in node_objects if isinstance(v, Vehicle)]
-    energy_consumption_estimate = get_energy_consumption_estimate(vehicle_ids, include_charging)
+    vehicles = [v for v in node_objects if isinstance(v, Vehicle)]
+    energy_consumption_estimate = get_energy_consumption_estimate([v.id_vehicle for v in vehicles], include_charging)
 
     n_edges = len(node_objects)
     time_matrix = np.zeros([n_edges, n_edges], dtype=int)
@@ -433,6 +435,11 @@ def get_cost_matrix(node_objects: list[NodeObject], cost_type: CostType, include
                 time_matrix[ii][jj] = 0
                 cost_matrix[ii][jj] = 0
                 energy_matrix[ii][jj] = 0
+                if to_node_object == 'depot':
+                    # Require high final charging level to avoid vehicles stranding somewhere
+                    energy_matrix[ii][jj] = 1 * vehicles[0].get_energy_capacity(include_charging)
+                    if isinstance(from_node_object, ChargingOpportunity):
+                        energy_matrix[ii][jj] -= from_node_object.available_energy
                 continue
 
             # Compute and save travel time/distance if the combination of edges is new
