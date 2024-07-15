@@ -496,7 +496,11 @@ def solve_from_initial_solution(routing: pywrapcp.RoutingModel, manager: pywrapc
         for index_vehicle in solution_requests:
             # use request ids ([0]) here and align with current status of the requests
             request_order = solution_requests[index_vehicle][0].copy()
+            unique_requests = []  # Todo: Make request_objects hashable to avoid for loop
             for request_object in solution_requests[index_vehicle][0]:
+                if request_object not in unique_requests:
+                    unique_requests.append(request_object)
+            for request_object in unique_requests:
                 if not isinstance(request_object, orToolsDataModel.Reservation):
                     continue
                 # Check if some reservations have been completed and must be removed from the initial route
