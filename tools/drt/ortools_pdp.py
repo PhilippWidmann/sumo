@@ -483,7 +483,11 @@ def restrict_charging_to_unoccupied_vehicles_constraint(data: orToolsDataModel.O
                                                         manager: pywrapcp.RoutingIndexManager):
     for co in data.charging_opportunities:
         index = manager.NodeToIndex(co.node)
-        capacity_dimension.CumulVar(index).SetMax(0)
+        capacity_dimension.SetCumulVarSoftUpperBound(
+            index,
+            0,
+            100000 * data.get_penalty(),
+        )
 
 
 def solve_from_initial_solution(routing: pywrapcp.RoutingModel, manager: pywrapcp.RoutingIndexManager,
