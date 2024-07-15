@@ -365,7 +365,7 @@ def run(penalty_factor: str | int, end: int = None, interval: int = 30, time_lim
                                                  flags=32,  # Interpret edgeID as a chargingStationID instead
                                                  duration=co.charging_time)
                         if verbose:
-                            print(f'Vehicle {id_vehicle}: Scheduled charging stop at {co.charging_station_id} '
+                            print(f'Vehicle {id_vehicle}: Scheduled charging stop at {co.id_charging_station} '
                                   f'(route position {insertion_index})')
                     stops_after_cs_scheduling = traci.vehicle.getStops(id_vehicle)  # Todo Philipp: remove debug
                     pass
