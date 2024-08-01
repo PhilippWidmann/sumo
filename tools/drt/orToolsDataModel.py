@@ -166,7 +166,7 @@ class Reservation:
 
 @dataclass
 class ChargingOpportunity:
-    id_charging_station: int
+    id_charging_station: str
     available_energy: int
     charging_time: int
     node: int = None
@@ -174,6 +174,16 @@ class ChargingOpportunity:
 
     def get_edge(self) -> str:
         return traci.chargingstation.getLaneID(self.id_charging_station).rsplit('_', 1)[0]
+
+    def get_stopping_point_id(self) -> tuple[str, int]:
+        lane = traci.chargingstation.getLaneID(self.id_charging_station)
+        if (self.id_charging_station in traci.parkingarea.getIDList()
+                and lane == traci.parkingarea.getLaneID(self.id_charging_station)):
+            flag = 65  # Stop at the parking area of same name at same lane (64 for parkingArea, 1 for parkingState)
+        else:
+            flag = 32  # Stop at charging station directly
+        return self.id_charging_station, flag
+
 
 
 @dataclass

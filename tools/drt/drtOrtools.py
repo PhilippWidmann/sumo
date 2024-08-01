@@ -359,10 +359,11 @@ def run(penalty_factor: str | int, end: int = None, interval: int = 30, time_lim
                         else:
                             insertion_index = 1 if traci.vehicle.isStopped(id_vehicle) else 0  # Todo Philipp: Evaluate if this is actually what we want
 
+                        stop_id, stop_flag = co.get_stopping_point_id()
                         traci.vehicle.insertStop(id_vehicle,
                                                  insertion_index,
-                                                 edgeID=co.id_charging_station,
-                                                 flags=32,  # Interpret edgeID as a chargingStationID instead
+                                                 edgeID=stop_id,
+                                                 flags=stop_flag,  # Interpret edgeID as a chargingStationID instead
                                                  duration=co.charging_time)
                         if verbose:
                             print(f'Vehicle {id_vehicle}: Scheduled charging stop at {co.id_charging_station} '
