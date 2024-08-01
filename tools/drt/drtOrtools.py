@@ -269,7 +269,7 @@ def run(penalty_factor: str | int, end: int = None, interval: int = 30, time_lim
     data_reservations = list()
     charging_opportunities = list()
     while running:
-
+        print(f'Timestep: {timestep}')
         traci.simulationStep(timestep)
 
         # termination condition
@@ -280,6 +280,14 @@ def run(penalty_factor: str | int, end: int = None, interval: int = 30, time_lim
         if not traci.vehicle.getTaxiFleet(-1) and timestep < end:
             timestep += interval
             continue
+
+        for t in traci.vehicle.getTaxiFleet(-1):
+            if traci.vehicle.getRoadID(t) == '':
+                # If a taxi is currently teleporting, we would get an error
+                # Skip this optimization step
+                print('############# Skipped due to teleport ####################')
+                timestep += interval
+                continue
 
         if verbose:
             print(f"timestep: {timestep}")
@@ -443,6 +451,8 @@ def check_set_arguments(arguments: argparse.Namespace):
     if arguments.drf < 1 and arguments.drf != -1:
         raise ValueError(
             f"Wrong value for drf '{arguments.drf}'. Value must be equal or greater than 1. -1 means no drf is used.")
+
+    arguments.time_limit = int(arguments.time_limit)
 
     if arguments.waiting_time < 0:
         raise ValueError(
