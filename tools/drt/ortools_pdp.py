@@ -383,7 +383,7 @@ def add_waiting_time_constraints(data: orToolsDataModel.ORToolsDataModel,
         reservation_time = request.reservation.reservationTime
         maximum_pickup_time = round(reservation_time + global_waiting_time)
         # add hard constraint for new reservations
-        if request.is_new():
+        if request.is_new() and False:
             if verbose:
                 print(f"reservation {request.get_id()} has a maximum (hard) pickup time at {maximum_pickup_time}")
             min_time_window = time_dimension.CumulVar(pickup_index).Min()
@@ -655,7 +655,7 @@ def main(data: orToolsDataModel.ORToolsDataModel,
     # Status codes: https://developers.google.com/optimization/routing/routing_options#search_status
     # Not listed is 7, which from some research should correspond to "global optimum found"
     print(f'## Optimization done, optimization status: {routing.status()}')
-    if routing.status() not in [1, 7]:  # [local opt, global opt]
+    if routing.status() not in [1, 2, 7]:  # [local opt, global opt]
         # If the heuristic cannot find a solution due to the added complexity of charging,
         # maybe it helps to ignore this and find a feasible solution without charging first.
         if data.include_charging and not simplified_resolve:
