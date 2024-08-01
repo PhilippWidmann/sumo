@@ -147,7 +147,7 @@ def add_transportation_requests_constraint(data: orToolsDataModel.ORToolsDataMod
             # allows to reject the order but gives penalty
             if verbose:
                 print(f'allow to reject new reservation {request.get_id()}')
-            routing.AddDisjunction([pickup_index, delivery_index], 10*data.get_penalty(True), 2)
+            routing.AddDisjunction([pickup_index, delivery_index], 100000*data.get_penalty(True), 2)
 
 
 def add_direct_route_factor_constraint(data: orToolsDataModel.ORToolsDataModel,
@@ -395,7 +395,7 @@ def add_waiting_time_constraints(data: orToolsDataModel.ORToolsDataModel,
             time_dimension.SetCumulVarSoftUpperBound(
                 pickup_index,
                 maximum_pickup_time,
-                100*data.get_penalty(True))  # cost = coefficient * (cumulVar - maximum_pickup_time)
+                int(0.1*data.get_penalty(True)))  # cost = coefficient * (cumulVar - maximum_pickup_time)
             if verbose:
                 print(f"reservation {request.get_id()} has a maximum (soft) pickup time at {maximum_pickup_time}")
 
