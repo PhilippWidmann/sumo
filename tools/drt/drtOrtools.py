@@ -342,7 +342,8 @@ def run(penalty_factor: str | int, end: int = None, interval: int = 30, time_lim
                         print(f"Costs for {id_vehicle}: {vehicle_requests[1]}")
                     if fix_allocation and not reservations_order:  # ignore empty reservations if allocation is fixed
                         continue
-                    traci.vehicle.dispatchTaxi(id_vehicle, reservations_order)  # overwrite existing dispatch
+                    if reservations_order:
+                        traci.vehicle.dispatchTaxi(id_vehicle, reservations_order)  # overwrite existing dispatch
                     stops_after_dispatch = traci.vehicle.getStops(id_vehicle)  # Todo Philipp: remove debug
 
                     # Then, insert stops at charging stations
@@ -459,8 +460,7 @@ def check_set_arguments(arguments: argparse.Namespace):
             f"Wrong value for waiting time '{arguments.waiting_time}'. Value must be equal or greater than 0.")
 
 
-if __name__ == "__main__":
-
+def main():
     arguments = get_arguments()
     check_set_arguments(arguments)
     # this script has been called from the command line. It will start sumo as a
@@ -473,3 +473,7 @@ if __name__ == "__main__":
     run(arguments.penalty_factor, arguments.end, arguments.interval,
         arguments.time_limit, arguments.cost_type, arguments.drf,
         arguments.waiting_time, arguments.number_charging_duplicates, arguments.fix_allocation, arguments.verbose)
+
+
+if __name__ == "__main__":
+    main()
