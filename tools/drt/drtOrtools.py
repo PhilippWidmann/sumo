@@ -470,6 +470,9 @@ def main():
     # subprocess and then the python script connects and runs
     traci.start([arguments.sumoBinary, "-c", arguments.sumo_config], traceFile=arguments.trace_file)
 
+    # Todo Philipp: Find better solution for this
+    orToolsDataModel.PREVIOUS_DISTANCES = None
+
     run(arguments.penalty_factor, arguments.end, arguments.interval,
         arguments.time_limit, arguments.cost_type, arguments.drf,
         arguments.waiting_time, arguments.number_charging_duplicates, arguments.fix_allocation, arguments.verbose)
