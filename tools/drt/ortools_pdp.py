@@ -24,6 +24,8 @@ Based on https://developers.google.com/optimization/routing/pickup_delivery#comp
 
 # needed for type alias in python < 3.9
 from __future__ import annotations
+
+import sys
 from typing import List, Dict, Tuple
 
 import numpy as np
@@ -420,8 +422,8 @@ def create_energy_dimension(data: orToolsDataModel.ORToolsDataModel,
     dimension_name = 'Energy'
     routing.AddDimensionWithVehicleCapacity(
         energy_callback_index,
-        10000000, #max(data['available_energy']),  # Slack: Maximal available_energy for recharging # Todo Philipp: Replace this with "unlimited" instead of magic number
-        [10000000, 10000000], #data['energy_capacities'],  # maximum energy_capacity per vehicle # Todo Philipp: Replace this with "unlimited" instead of magic number
+        sys.maxsize,  # Slack: Will be overwritten based on type
+        [sys.maxsize]*data.num_vehicles,  # Capacity: No hard, only soft u.b.: add_soft_minimal_energy_constraints
         False,  # Don't force start cumul to zero.
         dimension_name)
     energy_dimension = routing.GetDimensionOrDie(dimension_name)
