@@ -29,8 +29,6 @@ import os
 import sys
 import argparse
 
-import numpy as np
-
 import ortools_pdp
 import orToolsDataModel
 
@@ -41,6 +39,7 @@ if 'SUMO_HOME' in os.environ:
 # SUMO modules
 import sumolib  # noqa
 import traci  # noqa
+from traci._vehicle import StopData  # noqa
 
 PENALTY_FACTOR = 'dynamic'  # factor on penalty for rejecting requests
 
@@ -346,39 +345,48 @@ def run(penalty_factor: str | int, end: int = None, interval: int = 30, time_lim
                         traci.vehicle.dispatchTaxi(id_vehicle, reservations_order)  # overwrite existing dispatch
                     stops_after_dispatch = traci.vehicle.getStops(id_vehicle)  # Todo Philipp: remove debug
 
-                    # Then, insert stops at charging stations
-                    charging_stops = [(i, co) for i, co in enumerate(vehicle_requests[0])
-                                      if isinstance(co, orToolsDataModel.ChargingOpportunity)]  # At what position to schedule the cs
-                    charging_stop_indices = [s[0] for s in charging_stops]
-                    charging_opps = [s[1] for s in charging_stops]
-                    for ind_cs, co in zip(charging_stop_indices, charging_opps):
-                        if ind_cs > 0:
-                            # Note: Dispatched reservations at the same station may have been grouped into one stop,
-                            # so we have to compute the correct position to insert the planned charging stops
-                            served_reservations = [len(stop_data.actType.split(','))
-                                                   for stop_data in traci.vehicle.getStops(id_vehicle)]
-                            cumulative_served_reservations = list(np.cumsum(served_reservations))
-                            # Before the charging stop, ind_cs reservations/other charging ops had to be carried out
-                            finished_previous_operations = [cum >= ind_cs for cum in cumulative_served_reservations]
-                            insertion_index = finished_previous_operations.index(True) + 1
-                            if verbose and cumulative_served_reservations[insertion_index-1] > ind_cs:
-                                # This can happen if the solver returns a suboptimal solution
+                    def extract_reservation_ids(stop_data: StopData):
+                        # We extract the reservation ids from the actType, which has the form
+                        # "pickup person_id_1 (reservation_id_1),pickup person_id_2(reservation_id_2)"
+                        if not ('pickup' in stop_data.actType or 'dropOff' in stop_data.actType):
+                            return None
+                        reservation_ids = []
+                        for res_string in stop_data.actType.split(','):
+                            reservation_ids.append(res_string.split('(')[1].removesuffix(')'))
+                        return reservation_ids
+
+                    stop_index = len(stops_after_dispatch)
+                    stop_reservations = []
+                    for req in vehicle_requests[0][::-1]:
+                        # Note: Dispatched reservations at the same station may have been grouped into one stop,
+                        # so we have to compute the correct position to insert the planned charging stops.
+                        # Proceed backwards to avoid shifting indices.
+                        if isinstance(req, orToolsDataModel.ChargingOpportunity):
+                            insertion_index = stop_index
+                            if len(stop_reservations) != 0:
                                 print('Warning: Charging was scheduled in the middle of a passenger stop. '
                                       'Delayed to afterwards in the simulation.')
+                                insertion_index += 1
+                            stop_id, stop_flag = req.get_stopping_point_id()
+                            traci.vehicle.insertStop(id_vehicle,
+                                                     insertion_index,
+                                                     edgeID=stop_id,
+                                                     flags=stop_flag,  # Interpret edgeID as a chargingStationID instead
+                                                     duration=req.charging_time)
                         else:
-                            insertion_index = 1 if traci.vehicle.isStopped(id_vehicle) else 0  # Todo Philipp: Evaluate if this is actually what we want
+                            if stop_reservations == []:
+                                stop_index -= 1
+                                stop_reservations = extract_reservation_ids(stops_after_dispatch[stop_index])
+                            if req.get_id() not in stop_reservations:
+                                raise ValueError('Did not find reservation id at right point in dispatch. '
+                                                 'This should never happen!')
+                            stop_reservations.remove(req.get_id())
 
-                        stop_id, stop_flag = co.get_stopping_point_id()
-                        traci.vehicle.insertStop(id_vehicle,
-                                                 insertion_index,
-                                                 edgeID=stop_id,
-                                                 flags=stop_flag,  # Interpret edgeID as a chargingStationID instead
-                                                 duration=co.charging_time)
                         if verbose:
                             print(f'Vehicle {id_vehicle}: Scheduled charging stop at {co.id_charging_station} '
-                                  f'(route position {insertion_index})')
+                                  f'(route position {stop_index})')
                     stops_after_cs_scheduling = traci.vehicle.getStops(id_vehicle)  # Todo Philipp: remove debug
-                    pass
+                    print('')  # Todo Philipp: Remove
             else:
                 if verbose:
                     print("Found no solution, continue...")
