@@ -431,9 +431,10 @@ def get_cost_matrix(node_objects: list[NodeObject], cost_type: CostType, include
                 energy_matrix[ii][jj] = 0
                 if to_node_object == 'depot':
                     # Require high final charging level to avoid vehicles stranding somewhere
-                    energy_matrix[ii][jj] = 1 * vehicles[0].get_energy_capacity(include_charging)
                     if isinstance(from_node_object, ChargingOpportunity):
-                        energy_matrix[ii][jj] -= from_node_object.available_energy
+                        energy_matrix[ii][jj] = - from_node_object.available_energy
+                    else:
+                        energy_matrix[ii][jj] = 1 * vehicles[0].get_energy_capacity(include_charging)
                 continue
 
             # Compute and save travel time/distance if the combination of edges is new

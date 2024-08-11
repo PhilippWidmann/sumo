@@ -458,6 +458,7 @@ def create_energy_dimension(data: orToolsDataModel.ORToolsDataModel,
 
 def add_soft_minimal_energy_constraints(data: orToolsDataModel.ORToolsDataModel,
                                         energy_dimension: pywrapcp.RoutingDimension,
+                                        routing: pywrapcp.RoutingModel,
                                         manager: pywrapcp.RoutingIndexManager):
     for node in range(len(data.available_energy)):
         if node == data.depot:
@@ -476,6 +477,14 @@ def add_soft_minimal_energy_constraints(data: orToolsDataModel.ORToolsDataModel,
             #     int(0.9 * max(data.energy_capacities)),
             #     100000  # cost = coefficient * (cumulVar - critical_charge_level)
             # )
+        for index in [routing.End(v.vehicle_index) for v in data.vehicles]:
+            # Vehicle must end at charging station to avoid stranding.
+            # If it does, it will achieve energy level 0 at the depot
+            energy_dimension.SetCumulVarSoftUpperBound(
+                index,
+                0,  # upper bound 0; this will always be reached if the last stop is a charging station
+                1000000  # cost = coefficient * (cumulVar - 0)
+            )
 
 
 def restrict_charging_to_unoccupied_vehicles_constraint(data: orToolsDataModel.ORToolsDataModel,
@@ -637,7 +646,7 @@ def main(data: orToolsDataModel.ORToolsDataModel,
         #    routing.SetVehicleUsedWhenEmpty(True, v)
 
         # Add penalty for planning trips with very low energy levels
-        add_soft_minimal_energy_constraints(data, energy_dimension, manager)
+        add_soft_minimal_energy_constraints(data, energy_dimension, routing, manager)
 
         # May only charge if there are no passengers in vehicle
         restrict_charging_to_unoccupied_vehicles_constraint(data, capacity_dimension, manager)
