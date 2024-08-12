@@ -47,10 +47,14 @@ def get_solution(data: orToolsDataModel.ORToolsDataModel, manager: pywrapcp.Rout
     if verbose:
         print(f'Objective: {solution.ObjectiveValue()}')
     time_dimension = routing.GetDimensionOrDie('Time')
+    if data.include_charging:
+        energy_dimension = routing.GetDimensionOrDie('Energy')
     solution_dict = {}
     total_cost = 0
     for vehicle_id in range(data.num_vehicles):
         route = []
+        plan_output = ''
+        predicted_energy = []
         index = routing.Start(vehicle_id)
         if verbose:
             plan_output = 'Route for vehicle %s:\n    ' % vehicle_id
@@ -60,9 +64,14 @@ def get_solution(data: orToolsDataModel.ORToolsDataModel, manager: pywrapcp.Rout
             current_node = manager.IndexToNode(index)
             route_load += data.demands[current_node]
             time_var = time_dimension.CumulVar(index)
-            if verbose:
-                plan_output += (' %s (L: %s, C: %s, T: (%s,%s))\n -> ' %
-                                (current_node, route_load, route_cost, solution.Min(time_var), solution.Max(time_var)))
+            energy_value = 0
+            if data.include_charging:
+                energy_value = solution.Value(energy_dimension.CumulVar(index))
+                predicted_energy.append(energy_value)
+            if verbose or orToolsDataModel.VERBOSE_PHILIPP:
+                plan_output += (' %s (L: %s, C: %s, T: (%s,%s), E: %s)\n -> ' %
+                                (current_node, route_load, route_cost, solution.Min(time_var), solution.Max(time_var),
+                                 energy_value))
             route.append(current_node)
             previous_index = index
             index = solution.Value(routing.NextVar(index))
@@ -70,16 +79,22 @@ def get_solution(data: orToolsDataModel.ORToolsDataModel, manager: pywrapcp.Rout
         last_node = manager.IndexToNode(index)
         route_load += data.demands[last_node]
         time_var = time_dimension.CumulVar(index)
+        energy_value = 0
+        if data.include_charging:
+            energy_value = solution.Value(energy_dimension.CumulVar(index))
+            predicted_energy.append(energy_value)
         route.append(last_node)
-        if verbose:
-            plan_output += (' %s (L: %s, C: %s, T: (%s,%s))\n' %
-                            (last_node, route_load, route_cost, solution.Min(time_var), solution.Max(time_var)))
+        if verbose or orToolsDataModel.VERBOSE_PHILIPP:
+            plan_output += (' %s (L: %s, C: %s, T: (%s,%s), E: %s)\n' %
+                            (last_node, route_load, route_cost, solution.Min(time_var), solution.Max(time_var),
+                             energy_value))
             plan_output += 'Costs of the route: %s\n' % route_cost
             print(plan_output)
         total_cost += route_cost
         solution_dict[vehicle_id] = (route, route_cost)
-    if verbose:
+    if verbose or orToolsDataModel.VERBOSE_PHILIPP:
         print(f'Total cost of the routes: {total_cost}')
+        print(f'Objective value: {solution.ObjectiveValue()}')
     return solution_dict
 
 
