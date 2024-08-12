@@ -207,6 +207,7 @@ class ORToolsDataModel:
     energy_capacities: list[int]
     drf: float
     waiting_time: int
+    waiting_time_penalty: int
     time_windows: list[(int, int)]
     fix_allocation: bool
     max_time: int

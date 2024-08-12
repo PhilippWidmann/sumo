@@ -66,7 +66,7 @@ def dispatch(time_limit: int, solution_requests: TranslatedSolutions,
 
 
 def create_data_model(sumo_fleet: list[str], cost_type: orToolsDataModel.CostType,
-                      drf: float, waiting_time: int, end: int,
+                      drf: float, waiting_time: int, waiting_time_penalty: int, end: int,
                       fix_allocation: bool, solution_requests: TranslatedSolutions | None, penalty_factor: str | int,
                       data_reservations: list[orToolsDataModel.Reservation],
                       charging_opportunities: list[orToolsDataModel.ChargingOpportunity],
@@ -166,6 +166,7 @@ def create_data_model(sumo_fleet: list[str], cost_type: orToolsDataModel.CostTyp
         energy_capacities=energy_capacities,
         drf=drf,
         waiting_time=waiting_time,
+        waiting_time_penalty=waiting_time_penalty,
         time_windows=time_windows,
         fix_allocation=fix_allocation,
         max_time=end,
@@ -226,8 +227,8 @@ def solution_by_requests(solution_ortools: ortools_pdp.ORToolsSolution | None,
 
 def run(penalty_factor: str | int, end: int = None, interval: int = 30, time_limit: float = 10,
         cost_type: orToolsDataModel.CostType = orToolsDataModel.CostType.DISTANCE,
-        drf: float = 1.5, waiting_time: int = 900, number_charging_duplicates: int = 0, fix_allocation: bool = False,
-        verbose: bool = False):
+        drf: float = 1.5, waiting_time: int = 900, waiting_time_penalty: int = -1, number_charging_duplicates: int = 0,
+        fix_allocation: bool = False, verbose: bool = False):
     """
     Execute the TraCI control loop and run the scenario.
 
@@ -324,7 +325,7 @@ def run(penalty_factor: str | int, end: int = None, interval: int = 30, time_lim
                 print("Solve CPDP")
             if verbose:
                 print('Start creating the model.')
-            data = create_data_model(fleet, cost_type, drf, waiting_time, int(end),
+            data = create_data_model(fleet, cost_type, drf, waiting_time, waiting_time_penalty, int(end),
                                      fix_allocation, solution_requests, penalty_factor,
                                      data_reservations, charging_opportunities, timestep, verbose)
             data_reservations = data.reservations
@@ -432,6 +433,9 @@ def get_arguments() -> argparse.Namespace:
                     "does not change anymore")
     ap.add_argument("-w", "--waiting-time", type=ap.time, default=900,
                     help="maximum waiting time to serve a request in s")
+    ap.add_argument("--waiting-time-penalty", type=int, default=False,
+                    help="penalty per second over waiting-time (summed over all passengers);"
+                         "if -1: waiting-time is interpreted as a hard boundary")
     ap.add_argument("-p", "--penalty-factor", type=dynamic_or_int, default=PENALTY_FACTOR,
                     help="factor on penalty for rejecting requests, must be 'dynamic' or an integer (e.g. 100000)")
     ap.add_argument("--include-charging", action="store_true", default=False,
@@ -483,7 +487,8 @@ def main():
 
     run(arguments.penalty_factor, arguments.end, arguments.interval,
         arguments.time_limit, arguments.cost_type, arguments.drf,
-        arguments.waiting_time, arguments.number_charging_duplicates, arguments.fix_allocation, arguments.verbose)
+        arguments.waiting_time, arguments.waiting_time_penalty, arguments.number_charging_duplicates,
+        arguments.fix_allocation, arguments.verbose)
 
 
 if __name__ == "__main__":
