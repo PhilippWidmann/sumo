@@ -37,6 +37,7 @@ import traci._person
 import traci._simulation
 
 SPEED_DEFAULT = 20  # default vehicle speed in m/s
+VERBOSE_PHILIPP = False  # Todo Philipp: remove this and all references
 
 
 class CostType(Enum):
