@@ -149,7 +149,8 @@ def add_transportation_requests_constraint(data: orToolsDataModel.ORToolsDataMod
             # allows to reject the order but gives penalty
             if verbose:
                 print(f'allow to reject new reservation {request.get_id()}')
-            routing.AddDisjunction([pickup_index, delivery_index], 100000*data.get_penalty(True), 2)
+            # penalty equivalent to a day of forbidden tardiness
+            routing.AddDisjunction([pickup_index, delivery_index], 24*3600*data.get_penalty(True), 2)
 
 
 def add_direct_route_factor_constraint(data: orToolsDataModel.ORToolsDataModel,
@@ -384,21 +385,30 @@ def add_waiting_time_constraints(data: orToolsDataModel.ORToolsDataModel,
         pickup_index = manager.NodeToIndex(request.from_node)
         reservation_time = request.reservation.reservationTime
         maximum_pickup_time = round(reservation_time + global_waiting_time)
-        # add hard constraint for new reservations
-        if request.is_new() and False:
-            if verbose:
-                print(f"reservation {request.get_id()} has a maximum (hard) pickup time at {maximum_pickup_time}")
-            min_time_window = time_dimension.CumulVar(pickup_index).Min()
-            maximum_pickup_time = maximum_pickup_time if min_time_window < maximum_pickup_time else min_time_window
-            time_dimension.CumulVar(pickup_index).SetMax(maximum_pickup_time)
-        # add soft constraint for old reservations
+        if data.waiting_time_penalty == -1:
+            # add hard constraint for new reservations
+            if request.is_new():
+                if verbose:
+                    print(f"reservation {request.get_id()} has a maximum (hard) pickup time at {maximum_pickup_time}")
+                min_time_window = time_dimension.CumulVar(pickup_index).Min()
+                maximum_pickup_time = maximum_pickup_time if min_time_window < maximum_pickup_time else min_time_window
+                time_dimension.CumulVar(pickup_index).SetMax(maximum_pickup_time)
+            # add soft constraint (with high penalty) for old reservations
+            else:
+                time_dimension.SetCumulVarSoftUpperBound(
+                    pickup_index,
+                    maximum_pickup_time,
+                    1*data.get_penalty(True))  # cost = coefficient * (cumulVar - maximum_pickup_time)
+                if verbose:
+                    print(f"reservation {request.get_id()} has a maximum (soft) pickup time at {maximum_pickup_time}")
+            # add very small punishment for being over the target waiting time
         else:
+            # Soft waiting time constraint: Set a small (!) penalty for going over the waiting time
             time_dimension.SetCumulVarSoftUpperBound(
-                pickup_index,
-                maximum_pickup_time,
-                int(0.1*data.get_penalty(True)))  # cost = coefficient * (cumulVar - maximum_pickup_time)
-            if verbose:
-                print(f"reservation {request.get_id()} has a maximum (soft) pickup time at {maximum_pickup_time}")
+                    pickup_index,
+                    maximum_pickup_time,
+                    data.waiting_time_penalty,  # cost: 1 sec tardiness per passenger = penalty meters driven by vehicle
+            )
 
 
 def create_energy_dimension(data: orToolsDataModel.ORToolsDataModel,
@@ -472,7 +482,7 @@ def add_soft_minimal_energy_constraints(data: orToolsDataModel.ORToolsDataModel,
             energy_dimension.SetCumulVarSoftUpperBound(
                 index,
                 int(0.8*max(data.energy_capacities)),
-                10000000  # cost = coefficient * (cumulVar - critical_charge_level)
+                100000 * data.get_penalty(False)  # cost = coefficient * (cumulVar - critical_charge_level)
             )
             # energy_dimension.SetCumulVarSoftUpperBound(
             #     index,
@@ -484,8 +494,8 @@ def add_soft_minimal_energy_constraints(data: orToolsDataModel.ORToolsDataModel,
             # If it does, it will achieve energy level 0 at the depot
             energy_dimension.SetCumulVarSoftUpperBound(
                 index,
-                0,  # upper bound 0; this will always be reached if the last stop is a charging station
-                1000000  # cost = coefficient * (cumulVar - 0)
+                0,  # upper bound 0; this can always be reached if the last stop is a charging station
+                100000 * data.get_penalty(False)  # cost = coefficient * (cumulVar - 0)
             )
 
 
@@ -497,7 +507,7 @@ def restrict_charging_to_unoccupied_vehicles_constraint(data: orToolsDataModel.O
         capacity_dimension.SetCumulVarSoftUpperBound(
             index,
             0,
-            100000 * data.get_penalty(),
+            1000 * data.get_penalty(False),
         )
 
 
