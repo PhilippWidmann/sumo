@@ -395,7 +395,6 @@ def run(penalty_factor: str | int, end: int = None, interval: int = 30, time_lim
         timestep += interval
 
     # Finish
-    traci.close()
     sys.stdout.flush()
 
 
@@ -485,10 +484,13 @@ def main():
     # Todo Philipp: Find better solution for this
     orToolsDataModel.PREVIOUS_DISTANCES = None
 
-    run(arguments.penalty_factor, arguments.end, arguments.interval,
-        arguments.time_limit, arguments.cost_type, arguments.drf,
-        arguments.waiting_time, arguments.waiting_time_penalty, arguments.number_charging_duplicates,
-        arguments.fix_allocation, arguments.verbose)
+    try:
+        run(arguments.penalty_factor, arguments.end, arguments.interval,
+            arguments.time_limit, arguments.cost_type, arguments.drf,
+            arguments.waiting_time, arguments.waiting_time_penalty, arguments.number_charging_duplicates,
+            arguments.fix_allocation, arguments.verbose)
+    finally:
+        traci.close()
 
 
 if __name__ == "__main__":
