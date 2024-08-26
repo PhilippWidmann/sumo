@@ -29,6 +29,8 @@ import os
 import sys
 import argparse
 
+import pandas as pd
+
 import ortools_pdp
 import orToolsDataModel
 
@@ -228,7 +230,7 @@ def solution_by_requests(solution_ortools: ortools_pdp.ORToolsSolution | None,
 def run(penalty_factor: str | int, end: int = None, interval: int = 30, time_limit: float = 10,
         cost_type: orToolsDataModel.CostType = orToolsDataModel.CostType.DISTANCE,
         drf: float = 1.5, waiting_time: int = 900, waiting_time_penalty: int = -1, number_charging_duplicates: int = 0,
-        fix_allocation: bool = False, verbose: bool = False):
+        fix_allocation: bool = False, verbose: bool = False, debug_output_path: str = '.'):
     """
     Execute the TraCI control loop and run the scenario.
 
@@ -268,9 +270,17 @@ def run(penalty_factor: str | int, end: int = None, interval: int = 30, time_lim
     solution_requests = None
     data_reservations = list()
     charging_opportunities = list()
+    hourly_distances = dict()  # Todo Philipp: Remove this
     while running:
         print(f'Timestep: {timestep}')
         traci.simulationStep(timestep)
+
+        ### Additional output  # Todo Philipp: Remove this
+        if timestep % 3600 == 0:
+            hour = int(timestep / 3600)
+            orToolsDataModel.get_energy_consumption_estimate(traci.vehicle.getTaxiFleet(-1), True)
+            hourly_distances[hour] = orToolsDataModel.PREVIOUS_DISTANCES.copy()
+        ### End additional output
 
         # termination condition
         if timestep > end:
@@ -395,6 +405,21 @@ def run(penalty_factor: str | int, end: int = None, interval: int = 30, time_lim
         timestep += interval
 
     # Finish
+    ### Additional output  # Todo Philipp: Remove this
+    df_hourly_distances = pd.DataFrame()
+    empty_hours = []
+    for hour, dict_hour in hourly_distances.items():
+        if dict_hour == {}:
+            empty_hours.append(hour)
+            continue
+        for id_vehicle, distance in dict_hour.items():
+            df_hourly_distances.loc[hour, id_vehicle] = distance
+    for h in empty_hours:
+        df_hourly_distances.loc[h] = 0
+    df_hourly_distances = df_hourly_distances.fillna(0).sort_index()
+    df_hourly_distances.index.name = 'hour'
+    df_hourly_distances.to_csv(os.path.join(debug_output_path, 'hourly_vehicle_distances.out.csv'))
+    ### End additional output
     sys.stdout.flush()
 
 
@@ -443,6 +468,7 @@ def get_arguments() -> argparse.Namespace:
                     help="number of times each charging station is used in the route plan")
     ap.add_argument("--trace-file", type=ap.file,
                     help="log file for TraCI debugging")
+    ap.add_argument("--debug-output-path", type=str, default='.', help='Path where debug output files are written')
     return ap.parse_args()
 
 
@@ -482,13 +508,13 @@ def main():
     traci.start([arguments.sumoBinary, "-c", arguments.sumo_config], traceFile=arguments.trace_file)
 
     # Todo Philipp: Find better solution for this
-    orToolsDataModel.PREVIOUS_DISTANCES = None
+    orToolsDataModel.PREVIOUS_DISTANCES = dict()
 
     try:
         run(arguments.penalty_factor, arguments.end, arguments.interval,
             arguments.time_limit, arguments.cost_type, arguments.drf,
             arguments.waiting_time, arguments.waiting_time_penalty, arguments.number_charging_duplicates,
-            arguments.fix_allocation, arguments.verbose)
+            arguments.fix_allocation, arguments.verbose, arguments.debug_output_path)
     finally:
         traci.close()
 
