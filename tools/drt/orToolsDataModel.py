@@ -551,24 +551,21 @@ def get_penalty(penalty_factor: str | int, cost_matrix: list[list[int]]) -> int:
 
 # Todo Philipp: This global var is a hacky workaround for keeping previous values
 #     because the distance counter returns error values for parked vehicles
-PREVIOUS_DISTANCES = None
+PREVIOUS_DISTANCES = dict()
 def get_energy_consumption_estimate(fleet: list[str], include_charging: bool) -> float:
     if not include_charging:
         return 0
     global PREVIOUS_DISTANCES
-    if PREVIOUS_DISTANCES is None:
-        PREVIOUS_DISTANCES = [0] * len(fleet)
 
-    distances = []
     energy_used = 0
-    for i, id_vehicle in enumerate(fleet):
-        distances += [max(PREVIOUS_DISTANCES[i], traci.vehicle.getDistance(id_vehicle))]
+    for id_vehicle in fleet:
+        PREVIOUS_DISTANCES[id_vehicle] = max(PREVIOUS_DISTANCES.get(id_vehicle, 0),
+                                             traci.vehicle.getDistance(id_vehicle))
         energy_used += float(traci.vehicle.getParameter(id_vehicle, "device.battery.totalEnergyConsumed"))
-    if sum(distances) < 10000:
+    if sum(PREVIOUS_DISTANCES.values()) < 10000:
         Wh_per_m = 0
     else:
-        Wh_per_m = energy_used / sum(distances)
-    PREVIOUS_DISTANCES = distances
+        Wh_per_m = energy_used / sum(PREVIOUS_DISTANCES.values())
     print(Wh_per_m)
     #return 1.5 # Todo Philipp: Remove this!
     return Wh_per_m
