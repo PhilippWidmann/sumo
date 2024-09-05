@@ -128,7 +128,7 @@ def create_data_model(sumo_fleet: list[str], cost_type: orToolsDataModel.CostTyp
 
     # add "direct route cost" to the requests:
     for reservation in reservations:
-        reservation.update_direct_route_cost(type_vehicle, cost_matrix, cost_type)
+        reservation.update_direct_route_cost(type_vehicle, cost_matrix, time_matrix, cost_type)
         if verbose:
             print(f'Reservation {reservation.get_id()} has direct route costs {reservation.direct_route_cost}')
 

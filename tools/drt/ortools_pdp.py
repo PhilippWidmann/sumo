@@ -173,6 +173,23 @@ def add_transportation_requests_constraint(data: orToolsDataModel.ORToolsDataMod
             routing.AddDisjunction([pickup_index, delivery_index], 24*3600*data.get_penalty(True), 2)
 
 
+def add_travel_time_constraint(data: orToolsDataModel.ORToolsDataModel,
+                               routing: pywrapcp.RoutingModel,
+                               manager: pywrapcp.RoutingIndexManager,
+                               solver: pywrapcp.Solver,
+                               time_dimension: pywrapcp.RoutingDimension, verbose: bool):
+    for request in data.pickups_deliveries + data.dropoffs:
+        earliest_pickup = request.reservation.depart
+        direct_route_time = request.direct_route_time
+        target_dropoff_time = int(earliest_pickup + data.waiting_time + data.drf * direct_route_time)
+        dropoff_index = manager.NodeToIndex(request.to_node)
+        time_dimension.SetCumulVarSoftUpperBound(
+            dropoff_index,
+            target_dropoff_time,
+            data.waiting_time_penalty,  # cost: 1 sec tardiness per passenger = penalty meters driven by vehicle
+        )
+
+
 def add_direct_route_factor_constraint(data: orToolsDataModel.ORToolsDataModel,
                                        routing: pywrapcp.RoutingModel, manager: pywrapcp.RoutingIndexManager,
                                        solver: pywrapcp.Solver,
@@ -682,6 +699,9 @@ def main(data: orToolsDataModel.ORToolsDataModel,
 
     # Add waiting time constraints.
     add_waiting_time_constraints(data, manager, time_dimension, verbose)
+
+    # Set travel time constraint
+    add_travel_time_constraint(data, routing, manager, solver, time_dimension, verbose)
 
     # Setting first solution heuristic.
     search_parameters = set_first_solution_heuristic(time_limit_seconds, verbose)
