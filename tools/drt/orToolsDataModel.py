@@ -89,6 +89,7 @@ class Reservation:
     from_node: int = None
     to_node: int = None
     direct_route_cost: int = None
+    direct_route_time: int = None
     current_route_cost: int = None
     vehicle: Vehicle = None
 
@@ -120,15 +121,17 @@ class Reservation:
         return self.reservation.persons
 
     def update_direct_route_cost(self, type_vehicle: str, cost_matrix: list[list[int]] = None,
-                                 cost_type: CostType = CostType.DISTANCE):
+                                 time_matrix: list[list[int]] = None , cost_type: CostType = CostType.DISTANCE):
         if self.direct_route_cost:
             return
         if not self.is_picked_up():
             self.direct_route_cost = cost_matrix[self.from_node][self.to_node]
+            self.direct_route_time = time_matrix[self.from_node][self.to_node]
         else:
             # TODO: use 'historical data' from dict in get_cost_matrix instead
             route: traci._simulation.Stage = traci.simulation.findRoute(
                 self.get_from_edge(), self.get_to_edge(), vType=type_vehicle)
+            self.direct_route_time = round(route.travelTime)
             if cost_type == CostType.TIME:
                 self.direct_route_cost = round(route.travelTime)
             elif cost_type == CostType.DISTANCE:
