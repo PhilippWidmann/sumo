@@ -60,18 +60,24 @@ def get_solution(data: orToolsDataModel.ORToolsDataModel, manager: pywrapcp.Rout
             plan_output = 'Route for vehicle %s:\n    ' % vehicle_id
         route_cost = 0
         route_load = 0
+        energy_value = 0
+        energy_slack = 0
+        energy_transit = 0
         while not routing.IsEnd(index):
             current_node = manager.IndexToNode(index)
             route_load += data.demands[current_node]
             time_var = time_dimension.CumulVar(index)
-            energy_value = 0
             if data.include_charging:
                 energy_value = solution.Value(energy_dimension.CumulVar(index))
+                energy_slack = solution.Value(energy_dimension.SlackVar(index))
+                next_index = solution.Value(routing.NextVar(index))
+                next_node = manager.IndexToNode(next_index)
+                energy_transit = data.energy_matrix[current_node][next_node]
                 predicted_energy.append(energy_value)
             if verbose or orToolsDataModel.VERBOSE_PHILIPP:
-                plan_output += (' %s (L: %s, C: %s, T: (%s,%s), E: %s)\n -> ' %
+                plan_output += (' %s (L: %s, C: %s, T: (%s,%s), E: %s (-> ES: %s, ET: %s ))\n -> ' %
                                 (current_node, route_load, route_cost, solution.Min(time_var), solution.Max(time_var),
-                                 energy_value))
+                                 energy_value, energy_slack, energy_transit))
             route.append(current_node)
             previous_index = index
             index = solution.Value(routing.NextVar(index))
@@ -79,7 +85,6 @@ def get_solution(data: orToolsDataModel.ORToolsDataModel, manager: pywrapcp.Rout
         last_node = manager.IndexToNode(index)
         route_load += data.demands[last_node]
         time_var = time_dimension.CumulVar(index)
-        energy_value = 0
         if data.include_charging:
             energy_value = solution.Value(energy_dimension.CumulVar(index))
             predicted_energy.append(energy_value)
@@ -465,6 +470,8 @@ def create_energy_dimension(data: orToolsDataModel.ORToolsDataModel,
         energy_dimension.SlackVar(index).SetMax(co.available_energy)
         # Todo Philipp: This only works as long as we charge to full
         routing.solver().Add(energy_dimension.SlackVar(index) >= co.available_energy - energy_dimension.CumulVar(index))
+        routing.AddVariableMinimizedByFinalizer(energy_dimension.CumulVar(index))
+        routing.AddVariableMinimizedByFinalizer(energy_dimension.SlackVar(index))
         # Visiting charging opportunities is optional
         # In particular we assume no passengers can enter/exit at charging opportunities
         # routing.AddDisjunction([index], 1)
@@ -474,12 +481,26 @@ def create_energy_dimension(data: orToolsDataModel.ORToolsDataModel,
         index = manager.NodeToIndex(vehicle.start_node)
         energy_dimension.CumulVar(index).SetValue(vehicle.get_energy_capacity(True) - vehicle.get_current_energy(True))
         energy_dimension.SlackVar(index).SetValue(0)
+        routing.AddVariableMinimizedByFinalizer(energy_dimension.CumulVar(index))
+        routing.AddVariableMinimizedByFinalizer(energy_dimension.SlackVar(index))
         routing.AddToAssignment(energy_dimension.SlackVar(index))
     for res in data.pickups_deliveries:
         index = manager.NodeToIndex(res.from_node)
         energy_dimension.SlackVar(index).SetValue(0)
+        routing.AddToAssignment(energy_dimension.SlackVar(index))
+        routing.AddVariableMinimizedByFinalizer(energy_dimension.CumulVar(index))
+        routing.AddVariableMinimizedByFinalizer(energy_dimension.SlackVar(index))
+
         index = manager.NodeToIndex(res.to_node)
         energy_dimension.SlackVar(index).SetValue(0)
+        routing.AddVariableMinimizedByFinalizer(energy_dimension.CumulVar(index))
+        routing.AddVariableMinimizedByFinalizer(energy_dimension.SlackVar(index))
+        routing.AddToAssignment(energy_dimension.SlackVar(index))
+    for res in data.dropoffs:
+        index = manager.NodeToIndex(res.to_node)
+        energy_dimension.SlackVar(index).SetValue(0)
+        routing.AddVariableMinimizedByFinalizer(energy_dimension.CumulVar(index))
+        routing.AddVariableMinimizedByFinalizer(energy_dimension.SlackVar(index))
         routing.AddToAssignment(energy_dimension.SlackVar(index))
     return energy_dimension
 
