@@ -278,7 +278,7 @@ def run(penalty_factor: str | int, end: int = None, interval: int = 30, time_lim
         ### Additional output  # Todo Philipp: Remove this
         if timestep % 3600 == 0:
             hour = int(timestep / 3600)
-            orToolsDataModel.get_energy_consumption_estimate(traci.vehicle.getTaxiFleet(-1), True)
+            orToolsDataModel.get_energy_consumption_estimate(traci.vehicle.getTaxiFleet(-1), number_charging_duplicates>0)
             hourly_distances[hour] = orToolsDataModel.PREVIOUS_DISTANCES.copy()
         ### End additional output
 
@@ -384,6 +384,9 @@ def run(penalty_factor: str | int, end: int = None, interval: int = 30, time_lim
                                                      edgeID=stop_id,
                                                      flags=stop_flag,  # Interpret edgeID as a chargingStationID instead
                                                      duration=req.charging_time)
+                            if verbose:
+                                print(f'Vehicle {id_vehicle}: Scheduled charging stop at {req.id_charging_station} '
+                                      f'(route position {stop_index})')
                         else:
                             if stop_reservations == []:
                                 stop_index -= 1
@@ -393,9 +396,6 @@ def run(penalty_factor: str | int, end: int = None, interval: int = 30, time_lim
                                                  'This should never happen!')
                             stop_reservations.remove(req.get_id())
 
-                        if verbose:
-                            print(f'Vehicle {id_vehicle}: Scheduled charging stop at {co.id_charging_station} '
-                                  f'(route position {stop_index})')
                     stops_after_cs_scheduling = traci.vehicle.getStops(id_vehicle)  # Todo Philipp: remove debug
                     print('')  # Todo Philipp: Remove
             else:
